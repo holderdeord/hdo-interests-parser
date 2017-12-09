@@ -72,7 +72,7 @@ def download_new(url, path):
             if chunk:
                 f.write(chunk)
 
-    if _checksum(f.name) == _checksum(path):
+    if os.path.exists(path) and _checksum(f.name) == _checksum(path):
         os.remove(f.name)
         return False
 
