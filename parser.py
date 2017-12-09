@@ -1,6 +1,9 @@
 """ Ref: https://www.stortinget.no/no/Stortinget-og-demokratiet/Representantene/Okonomiske-interesser/"""
 import csv
+import hashlib
 import os
+import tempfile
+
 import requests
 import re
 import shutil
@@ -43,12 +46,40 @@ INTEREST_CATS = {
 }
 
 
-def _download(url, path):
+def _checksum(filename):
+    buf_size = 128 * 1024  # 128kb chunks
+
+    sha1 = hashlib.sha1()
+
+    with open(filename, 'rb') as f:
+        while True:
+            data = f.read(buf_size)
+            if not data:
+                break
+            sha1.update(data)
+
+    return sha1.hexdigest()
+
+
+def download_new(url, path):
+    """ Download new file, if checksum changed then overwrite if not do nothing"""
+    if not os.path.exists('out'):
+        os.mkdir('out')
+
     r = requests.get(url, stream=True)
-    with open(path, 'wb') as f:
-        for chunk in r.iter_content(chunk_size=1024):
+    with tempfile.NamedTemporaryFile('wb', delete=False) as f:
+        for chunk in r.iter_content(chunk_size=4096):
             if chunk:
                 f.write(chunk)
+
+    if _checksum(f.name) == _checksum(path):
+        os.remove(f.name)
+        return False
+
+    # Move/overwrite
+    shutil.move(f.name, path)
+
+    return True
 
 
 def _is_int(text):
@@ -80,14 +111,8 @@ def clean_category_text(line):
     return cleaned
 
 
-def get_pdf_text():
-    pdf_path = 'out/interests.pdf'
-    if not os.path.exists('out'):
-        os.mkdir('out')
-
-    _download(REP_URL, pdf_path)
-
-    p = subprocess.Popen(['pdftotext', '-nopgbrk', '-layout', pdf_path, '-'], stdout=subprocess.PIPE,
+def get_pdf_text(file_path):
+    p = subprocess.Popen(['pdftotext', '-nopgbrk', '-layout', file_path, '-'], stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE)
     out, err = p.communicate()
 
@@ -210,13 +235,18 @@ def get_last_updated(text):
 
 
 if __name__ == '__main__':
-    pdf_text = get_pdf_text()
+    pdf_path = 'out/interests.pdf'
+    is_updated = download_new(REP_URL, pdf_path)
+    if not is_updated:
+        exit(0)
+
+    pdf_text = get_pdf_text(pdf_path)
     pdf_text = clean_text(pdf_text)
     last_updated = get_last_updated(pdf_text)
     last_updated_str = last_updated.strftime('%Y-%m-%d')
 
     # Archive
-    shutil.copy('out/interests.pdf', 'out/interests-{}.pdf'.format(last_updated_str))
+    shutil.copy(pdf_path, 'out/interests-{}.pdf'.format(last_updated_str))
 
     res = get_pdf_rep_data(pdf_text)
     res = flatten_data(res)
