@@ -2,6 +2,7 @@
 import argparse
 import csv
 import hashlib
+import json
 import os
 import re
 import requests
@@ -18,7 +19,7 @@ REP_URL = 'https://www.stortinget.no/globalassets/pdf/verv_oekonomiske_interesse
 NO_REP_TEXT = 'Ingen registrerte opplysninger'
 
 INTEREST_CAT_RES = [
-    r'Har ingen registreringsplik-\ntige interesser',
+    r'Har ingen registreringsplik-?\n?tige interesser',
     r'Styreverv m\.?v\.',
     r'Selvstendig næring',
     r'Lønnet stilling m\.?v\.',
@@ -30,6 +31,7 @@ INTEREST_CAT_RES = [
     r'Utenlandsreiser',
     r'Gaver',
 ]
+INTEREST_CAT_RES_NO_PAD = re.compile(r'|'.join(INTEREST_CAT_RES))
 INTEREST_CAT_RES = re.compile(r'\s\s|'.join(INTEREST_CAT_RES))
 
 INTEREST_CATS = OrderedDict({
@@ -126,7 +128,7 @@ def get_representative_data(document_text, last_rep, rep=None):
 
     # Representative meta data
     last_name, first_name = last_rep.group('name').split(',')
-    rep_data = {key: last_rep.group(key).strip() for key in ['rep_number', 'party', 'district']}
+    rep_data = {key: last_rep.group(key).strip() for key in ['rep_number', 'party']}
     rep_data.update({
         'first_name': first_name.strip(),
         'last_name': last_name.strip()
@@ -139,12 +141,18 @@ def get_representative_data(document_text, last_rep, rep=None):
 
     # Reps with no registered interests
     if rep_text.strip() == NO_REP_TEXT:
-        rep_data[NO_REP_TEXT] = 'Ja'
+        rep_data[NO_REP_TEXT] = True
         return rep_data
 
     # Split the representative section text by category id followed by a dot
     new_category_pattern = re.compile(r'^(\d{1,2})\.\s', re.MULTILINE)
 
+    rep_data['by_category'] = parse_categories(new_category_pattern, rep_text)
+
+    return rep_data
+
+
+def parse_categories(new_category_pattern, rep_text):
     cats = {}
     cat_id = None
     for line in new_category_pattern.split(rep_text):
@@ -154,19 +162,21 @@ def get_representative_data(document_text, last_rep, rep=None):
         elif _is_int(line):
             cat_id = line  # this is the category id
         else:
-            cats[INTEREST_CATS[cat_id]] = clean_category_text(line)
+            cat_text = clean_category_text(line)
+            if cat_id == '1':  # No reg interests
+                cat_text = True
+            elif INTEREST_CAT_RES_NO_PAD.findall(cat_text) or cat_text == '':
+                continue
+            cats[INTEREST_CATS[cat_id]] = cat_text
 
-    rep_data['by_category'] = cats
-
-    return rep_data
+    return cats
 
 
 def get_pdf_rep_data(text):
-    """ Match representative name, number, party and district and use these matches as delimiters"""
+    """ Match representative name, number, party and rest up until ')\n' and use these matches as delimiters"""
     data = OrderedDict()
-    ministry_re = r',? ?(?P<minister>[\w -]+)?,? ?(?P<ministry>[\w -]+)?'
     rep_pattern = re.compile(
-        r'(?P<name>[-\w,. ]+)\((?P<rep_number>\d+), (?P<party>\w+), (?P<district>[\w -]+)' + ministry_re + '\)\n',
+        r'(?P<name>[-\w,. ]+)\((?P<rep_number>\d+), (?P<party>\w+),([-,\w\s]+)?\)\n',
         re.MULTILINE)
 
     last_rep = None
@@ -186,13 +196,17 @@ def get_pdf_rep_data(text):
 
 
 def write_csv(path, data):
-    field_names = ['rep_number', 'first_name', 'last_name', 'party', 'district'] + \
-                  list(INTEREST_CATS.values()) + [NO_REP_TEXT]
+    field_names = ['rep_number', 'first_name', 'last_name', 'party'] + list(INTEREST_CATS.values()) + [NO_REP_TEXT]
 
     with open(path, 'w', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=field_names)
         writer.writeheader()
         writer.writerows(data)
+
+
+def write_json(path, data):
+    with open(path, 'w+') as f:
+        json.dump(data, f)
 
 
 def flatten_data(data):
@@ -253,6 +267,7 @@ def fetch_latest_and_parse():
     res = get_pdf_rep_data(pdf_text)
     res = flatten_data(res)
     write_csv('out/interests-{}.csv'.format(last_updated_str), res)
+    write_json('out/interests-{}.json'.format(last_updated_str), res)
 
 
 def parse_existing():
@@ -273,6 +288,7 @@ def parse_existing():
         res = get_pdf_rep_data(pdf_text)
         res = flatten_data(res)
         write_csv('out/interests-{}.csv'.format(last_updated_str), res)
+        write_json('out/interests-{}.json'.format(last_updated_str), res)
 
 
 def get_arguments():
