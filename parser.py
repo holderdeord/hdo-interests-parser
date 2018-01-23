@@ -1,16 +1,17 @@
 """ Ref: https://www.stortinget.no/no/Stortinget-og-demokratiet/Representantene/Okonomiske-interesser/"""
+import argparse
 import csv
 import hashlib
 import os
-import tempfile
-
-import requests
 import re
+import requests
+import tempfile
 import shutil
 import subprocess
 
 from collections import OrderedDict
 from datetime import datetime
+from pathlib import Path
 
 REP_URL = 'https://www.stortinget.no/globalassets/pdf/verv_oekonomiske_interesser_register/verv_ok_interesser.pdf'
 
@@ -31,7 +32,7 @@ INTEREST_CAT_RES = [
 ]
 INTEREST_CAT_RES = re.compile(r'\s\s|'.join(INTEREST_CAT_RES))
 
-INTEREST_CATS = {
+INTEREST_CATS = OrderedDict({
     '1': 'Har ingen registreringspliktige interesser',
     '2': 'Styreverv mv.',
     '3': 'Selvstendig næring',
@@ -43,7 +44,7 @@ INTEREST_CATS = {
     '9': 'Aksjer mv.',
     '10': 'Utenlandsreiser',
     '11': 'Gaver',
-}
+})
 
 
 def _checksum(filename):
@@ -234,10 +235,11 @@ def get_last_updated(text):
     return datetime.strptime(date_text, '%d %m %Y').date()
 
 
-if __name__ == '__main__':
+def fetch_latest_and_parse():
     pdf_path = 'out/interests.pdf'
     is_updated = download_new(REP_URL, pdf_path)
     if not is_updated:
+        print("Did nothing, latest PDF already downloaded and parsed")
         exit(0)
 
     pdf_text = get_pdf_text(pdf_path)
@@ -251,3 +253,40 @@ if __name__ == '__main__':
     res = get_pdf_rep_data(pdf_text)
     res = flatten_data(res)
     write_csv('out/interests-{}.csv'.format(last_updated_str), res)
+
+
+def parse_existing():
+    out = Path('out')
+    pdfs = out.glob('*.pdf')
+    seen = []
+    for pdf in pdfs:
+        pdf_text = get_pdf_text(pdf.resolve())
+        pdf_text = clean_text(pdf_text)
+        last_updated = get_last_updated(pdf_text)
+        last_updated_str = last_updated.strftime('%Y-%m-%d')
+        if last_updated_str in seen:
+            print("Skipping already parsed '{}'".format(pdf.resolve()))
+            continue
+
+        seen.append(last_updated_str)
+
+        res = get_pdf_rep_data(pdf_text)
+        res = flatten_data(res)
+        write_csv('out/interests-{}.csv'.format(last_updated_str), res)
+
+
+def get_arguments():
+    desc = 'Fetch and parse representative interests from {}'.format(REP_URL)
+    parser = argparse.ArgumentParser(description=desc)
+    parser.add_argument('--parse-existing', action='store_true', default=False,
+                        help='Reparse existing PDFs')
+
+    return parser.parse_args()
+
+
+if __name__ == '__main__':
+    args = get_arguments()
+    if args.parse_existing:
+        parse_existing()
+    else:
+        fetch_latest_and_parse()
