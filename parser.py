@@ -275,12 +275,13 @@ def parse_existing():
     pdfs = out.glob('*.pdf')
     seen = []
     for pdf in pdfs:
-        pdf_text = get_pdf_text(pdf.resolve())
+        pdf_path = str(pdf.resolve())
+        pdf_text = get_pdf_text(pdf_path)
         pdf_text = clean_text(pdf_text)
         last_updated = get_last_updated(pdf_text)
         last_updated_str = last_updated.strftime('%Y-%m-%d')
         if last_updated_str in seen:
-            print("Skipping already parsed '{}'".format(pdf.resolve()))
+            print("Skipping already parsed '{}'".format(pdf_path))
             continue
 
         seen.append(last_updated_str)
