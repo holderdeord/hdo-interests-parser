@@ -8,6 +8,10 @@ jobs:
       - restore_cache:
           key: v1-deps-{{ checksum "Pipfile.lock" }}
       - run:
+          name: Install poppler
+          command: |
+            sudo apt-get update && sudo apt-get install poppler-utils -y
+      - run:
           name: Install deps and run parser
           command: |
             sudo pip install pipenv
