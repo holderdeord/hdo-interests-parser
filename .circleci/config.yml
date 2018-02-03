@@ -4,6 +4,9 @@ jobs:
     docker:
       - image: circleci/python:3
     steps:
+      - add_ssh_keys:
+          fingerprints:
+            - "cd:0e:48:63:be:a2:0e:f7:03:04:e7:7b:d8:51:8e:71"
       - checkout
       - restore_cache:
           key: v1-deps-{{ checksum "Pipfile.lock" }}
