@@ -24,7 +24,7 @@ class InterestParser:
     PDF_DIR = Path('pdfs')
     DATA_DIR = Path('data')
 
-    NO_REP_TEXT = 'Ingen registrerte opplysninger'
+    NO_REP_TEXTS = ['Ingen registrerte opplysninger', 'Ingen mottatte opplysninger']
 
     INTEREST_CAT_RES = [
         r'Har ingen registreringsplik-?\n?tige interesser',
@@ -55,6 +55,9 @@ class InterestParser:
         '10': 'Utenlandsreiser',
         '11': 'Gaver',
     })
+
+    def __init__(self, verbose=False):
+        self.verbose = verbose
 
     def download_new_pdf(self, url, path: Path):
         """ Download new file, if checksum changed then overwrite if not do nothing"""
@@ -121,8 +124,8 @@ class InterestParser:
         rep_text = document_text[rep_text_start:rep_text_stop]
 
         # Reps with no registered interests
-        if rep_text.strip() == self.NO_REP_TEXT:
-            rep_data[self.NO_REP_TEXT] = True
+        if rep_text.strip() in self.NO_REP_TEXTS:
+            rep_data[self.NO_REP_TEXTS[0]] = True
             return rep_data
 
         # Split the representative section text by category id followed by a dot
@@ -232,12 +235,15 @@ class InterestParser:
 
         if archive_pdf:
             archive_path = self.PDF_DIR.joinpath('interests-{}.pdf'.format(last_updated_str))
-            shutil.copy(pdf_path, archive_path)
+            try:
+                shutil.copy(pdf_path, archive_path)
+            except shutil.SameFileError:
+                pass  # skip already archived
 
         res = self.parse_pdf_text(pdf_text)
         res = self.flatten_data(res)
 
-        field_names = ['rep_number', 'first_name', 'last_name', 'party'] + list(self.INTEREST_CATS.values()) + [self.NO_REP_TEXT]
+        field_names = ['rep_number', 'first_name', 'last_name', 'party'] + list(self.INTEREST_CATS.values()) + [self.NO_REP_TEXTS[0]]
         csv_path = self.DATA_DIR.joinpath('interests-{}.csv'.format(last_updated_str))
         write_csv(csv_path, res, field_names)
 
@@ -249,6 +255,8 @@ class InterestParser:
     def parse_existing(self):
         seen = []
         for pdf in self.PDF_DIR.glob('*.pdf'):
+            if self.verbose:
+                print(f'Parsing \'{pdf}\'')
             last_updated_str = self.parse_and_save(pdf, archive_pdf=False, seen=seen)
 
             if last_updated_str is not None:
@@ -260,13 +268,15 @@ def get_arguments():
     p = argparse.ArgumentParser(description=desc)
     p.add_argument('--parse-existing', action='store_true', default=False,
                    help='Reparse existing PDFs')
+    p.add_argument('--verbose', action='store_true', default=False,
+                   help='Verbose output')
 
     return p.parse_args()
 
 
 if __name__ == '__main__':
-    parser = InterestParser()
     args = get_arguments()
+    parser = InterestParser(verbose=args.verbose)
     if args.parse_existing:
         parser.parse_existing()
     else:
