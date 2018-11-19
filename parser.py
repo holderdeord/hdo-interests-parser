@@ -38,6 +38,8 @@ class InterestParser:
         r'Aksjer m\.?v\.',
         r'Utenlandsreiser',
         r'Gaver',
+        r'Opplysninger om selskaps-?\n?gjeld',
+        r'Andre forhold',
     ]
     INTEREST_CAT_RES_NO_PAD = re.compile(r'|'.join(INTEREST_CAT_RES))
     INTEREST_CAT_RES = re.compile(r'\s\s|'.join(INTEREST_CAT_RES))
@@ -54,6 +56,8 @@ class InterestParser:
         '9': 'Aksjer mv.',
         '10': 'Utenlandsreiser',
         '11': 'Gaver',
+        '12': 'Opplysninger om selskapsgjeld',
+        '98': 'Andre forhold'
     })
 
     def __init__(self, verbose=False):
