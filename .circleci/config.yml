@@ -1,8 +1,10 @@
-version: 2
+version: 2.1
 jobs:
   build:
     docker:
-      - image: circleci/python:3
+      - image: cimg/python:3.8
+        environment:
+          PIPENV_VENV_IN_PROJECT: 1
     steps:
       - add_ssh_keys:
           fingerprints:
@@ -11,22 +13,24 @@ jobs:
       - restore_cache:
           key: v2-deps-{{ checksum "Pipfile.lock" }}
       - run:
-          name: Install poppler
+          name: Install requirements (poppler and pipenv)
           command: |
-            sudo apt-get update && sudo apt-get install poppler-utils -y
+            sudo apt-get update
+            sudo apt-get install poppler-utils -y
+            pip install -U pip
+            pip install pipenv
       - run:
-          name: Install deps and run parser
-          command: |
-            sudo pip install pipenv
-            pipenv install
-            pipenv run python parser.py
-      - run:
-          name: Archive PDF and related data in git
-          command: |
-            ./git_archive.sh
+          name: install dependencies and parse
+          command: pipenv install
       - save_cache:
           key: v2-deps-{{ checksum "Pipfile.lock" }}
-          paths: "~/.local/share/virtualenvs/"
+          paths: .venv
+      - run:
+          name: Download and parse
+          command: pipenv run python parser.py
+      - run:
+          name: Archive PDF and related data in git
+          command: ./git_archive.sh
 
 workflows:
    version: 2
