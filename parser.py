@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import argparse
 import re
+import sys
 from pprint import pprint
 
 import requests
@@ -83,7 +84,8 @@ class InterestParser:
         for i, page in enumerate(self.pdf_dict["pdf2xml"]["page"]):
             texts = page["text"]
             for text in texts:
-                if "Representanter" in text.get("b", ""):
+                heading = text.get("b", "")
+                if heading and "Representanter" in heading:
                     return i
         return -1
 
@@ -100,22 +102,26 @@ class InterestParser:
             "Vararepresentanter",
         ]
         left_col_y_coord = "106"
+        # FIXME: calc these based on first rep data
         right_col_y_coord = "319"
+        right_col_y_coord_legacy = "362"
 
         reps = []
         last_rep = None
         by_category = {}
         last_category = None
         last_text = ""
-        for page in rep_pages:
-            for text in page["text"]:
+        last_text_hyphenated = False
+        last_header_swallowed_current = False
+        for page_idx, page in enumerate(rep_pages):
+            for text_idx, text in enumerate(page["text"]):
                 # all reps are in bold (headers) with a few exceptions
                 header = text.get("b", "")
                 content = text.get("#text", "")
 
                 is_rep_header = header and header not in non_rep_headers
                 is_category = content and text["@left"] == left_col_y_coord and content != page["@number"]
-                is_interest_text = content and text["@left"] == right_col_y_coord
+                is_interest_text = content and text["@left"] in [right_col_y_coord, right_col_y_coord_legacy]
 
                 if is_rep_header:
                     if last_category and last_text:
@@ -129,12 +135,24 @@ class InterestParser:
                         reps.append(rep_data)
                         by_category = {}
 
+                    hyphenated = header[-1] == "-"
+                    if last_header_swallowed_current:
+                        last_header_swallowed_current = False
+                        continue
+                    # FIXME: join headers in a more generic way
+                    elif hyphenated or header == "Abrahamsen,":
+                        last_header_swallowed_current = True
+                        next_header = page["text"][text_idx + 1].get("b", "")
+                        header_start = header[:-1] if hyphenated else header
+                        header = header_start + next_header
+
                     rep_pattern = re.compile(
                         r"(?P<full_name>[-\w,. ]+)\(((?P<rep_number>\d+), )?(?P<party>\w+),? ?([-,\w\s]+)?\)"
                     )
                     m = rep_pattern.match(header)
                     assert m
-                    last_name, first_name = m.group("full_name").split(", ")
+                    assert len(m.group("full_name").split(",")) > 1, m.group("full_name")
+                    last_name, first_name = m.group("full_name").split(",")
                     last_rep = {
                         "first_name": first_name.strip(),
                         "last_name": last_name.strip(),
@@ -149,18 +167,31 @@ class InterestParser:
 
                     # FIXME: NO_REP_TEXTS
                     last_category = "1"
-                    if "§" in content:
+                    if content.startswith("§"):
                         last_category = content.replace("§", "").split(" ")[0].strip()
+                    elif re.match(r"\d{1,2}\.", content):
+                        last_category = content.replace(".", "").split(" ")[0].strip()
 
                 elif is_interest_text:
+                    # FIXME: do this by setting state instead of reading ahead
+                    if last_text_hyphenated:
+                        last_text_hyphenated = False
+                        continue
+                    elif content[-1] == "-":
+                        last_text_hyphenated = True
+                        if len(page["text"]) <= text_idx + 1:
+                            # FIXME: hyphenation over pages! POOOW!
+                            next_text = pages[page_idx + 1]["text"][0]
+                        else:
+                            next_text = page["text"][text_idx + 1]
+                        content = content[:-1] + next_text.get("#text", "")
+
                     last_text = f"{last_text}\n{content}" if last_text else f"{last_text}{content}"
 
         # flush last data
         if last_category and last_text:
             by_category[last_category] = last_text
-        reps.append(
-            {**last_rep, "by_category": by_category,}
-        )
+        reps.append({**last_rep, "by_category": by_category})
 
         return reps
 
@@ -217,15 +248,15 @@ class InterestParser:
                 pass  # skip already archived
 
         res = self.parse_pdf_data()
-        flattened = self.flatten_data(res)
 
+        json_path = self.DATA_DIR.joinpath(f"interests-{updated_at_str}.json")
+        json_data = {"_meta": {"categories": self.INTEREST_CATS, "updated_at": updated_at_str,}, "reps": res}
+        write_json(json_path, json_data)
+
+        flattened = self.flatten_data(res)
         field_names = ["first_name", "last_name", "party"] + list(self.INTEREST_CATS.values()) + [self.NO_REP_TEXTS[0]]
         csv_path = self.DATA_DIR.joinpath(f"interests-{updated_at_str}.csv")
-        json_path = self.DATA_DIR.joinpath(f"interests-{updated_at_str}.json")
         write_csv(csv_path, flattened, field_names)
-        write_json(
-            json_path, {"_meta": {"categories": self.INTEREST_CATS, "updated_at": updated_at_str,}, "reps": res,},
-        )
 
         return updated_at_str
 
@@ -238,6 +269,18 @@ class InterestParser:
 
             if last_updated_str is not None:
                 seen.append(last_updated_str)
+
+    def parse_single(self, file_path):
+        path = Path(file_path)
+        if not str(path).endswith(".pdf"):
+            print(f"File {path} does not end in .pdf")
+            sys.exit(1)
+        if not path.exists():
+            print(f"File {path} does not exist")
+            sys.exit(1)
+        if self.verbose:
+            print(f"Parsing '{path}'")
+        self.parse_and_save(path, archive_pdf=False)
 
     def flatten_data(self, data):
         flattened = []
@@ -255,21 +298,23 @@ class InterestParser:
         return flattened
 
 
-def get_arguments():
-    desc = InterestParser.__doc__
-    p = argparse.ArgumentParser(description=desc)
+def main():
+    p = argparse.ArgumentParser(description=InterestParser.__doc__)
     p.add_argument(
         "--parse-existing", action="store_true", default=False, help="Reparse existing PDFs",
     )
     p.add_argument("--verbose", action="store_true", default=False, help="Verbose output")
+    p.add_argument("file", type=str)
+    args = p.parse_args()
 
-    return p.parse_args()
-
-
-if __name__ == "__main__":
-    args = get_arguments()
     parser = InterestParser(verbose=args.verbose)
+    if args.file:
+        parser.parse_single(args.file)
     if args.parse_existing:
         parser.parse_existing()
     else:
         parser.fetch_latest_and_parse()
+
+
+if __name__ == "__main__":
+    main()
