@@ -3,6 +3,9 @@ import csv
 import hashlib
 import json
 from pathlib import Path
+from subprocess import Popen, PIPE
+
+import xmltodict
 
 
 def file_checksum(path: Path):
@@ -10,7 +13,7 @@ def file_checksum(path: Path):
 
     sha1 = hashlib.sha1()
 
-    with path.open('rb') as f:
+    with path.open("rb") as f:
         while True:
             data = f.read(buf_size)
             if not data:
@@ -29,12 +32,26 @@ def is_int(text):
 
 
 def write_json(path: Path, data):
-    with path.open('w+') as f:
+    with path.open("w+") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def write_csv(path: Path, data, field_names):
-    with path.open('w', newline='') as csvfile:
+    with path.open("w", newline="") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=field_names)
         writer.writeheader()
         writer.writerows(data)
+
+
+def pdf_to_xml_dict(file_path):
+    p = Popen(["pdftohtml", "-i", "-xml", "-stdout", file_path], stdout=PIPE, stderr=PIPE)
+    out, err = p.communicate()
+
+    return xmltodict.parse(out.decode("utf-8"))
+
+
+def pdf_to_text(file_path):
+    p = Popen(["pdftotext", "-nopgbrk", "-layout", file_path, "-"], stdout=PIPE, stderr=PIPE)
+    out, err = p.communicate()
+
+    return out.decode("utf-8")

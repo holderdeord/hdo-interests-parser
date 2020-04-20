@@ -1,16 +1,17 @@
 [[source]]
-
 url = "https://pypi.python.org/simple"
 verify_ssl = true
 name = "pypi"
 
+[packages]
+requests = ">=2.20.0"
+xmltodict = "*"
 
 [dev-packages]
+black = "==19.10b0"
+pytest = "*"
+pytest-only = "*"
+pytest-clarity = "==0.3.0a0"
 
-
-
-[packages]
-
-requests = ">=2.20.0"
-
-
+[requires]
+python_version = "3.8"

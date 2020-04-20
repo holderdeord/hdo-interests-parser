@@ -2,16 +2,17 @@
 # -*- coding: utf-8 -*-
 import argparse
 import re
+from pprint import pprint
+
 import requests
 import tempfile
 import shutil
-import subprocess
 
 from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 
-from utils import write_csv, write_json, file_checksum, is_int
+from utils import write_csv, write_json, file_checksum, pdf_to_xml_dict
 
 
 class InterestParser:
@@ -20,48 +21,35 @@ class InterestParser:
 
         https://www.stortinget.no/no/Stortinget-og-demokratiet/Representantene/Okonomiske-interesser/
     """
-    REP_URL = 'https://www.stortinget.no/globalassets/pdf/verv_oekonomiske_interesser_register/verv_ok_interesser.pdf'
-    PDF_DIR = Path('pdfs')
-    DATA_DIR = Path('data')
 
-    NO_REP_TEXTS = ['Ingen registrerte opplysninger', 'Ingen mottatte opplysninger']
+    REP_URL = "https://www.stortinget.no/globalassets/pdf/verv_oekonomiske_interesser_register/verv_ok_interesser.pdf"
+    PDF_DIR = Path("pdfs")
+    DATA_DIR = Path("data")
 
-    INTEREST_CAT_RES = [
-        r'Har ingen registreringsplik-?\n?tige interesser',
-        r'Styreverv m\.?v\.',
-        r'Selvstendig næring',
-        r'Lønnet stilling m\.?v\.',
-        r'Tidligere arbeidsgiver',
-        r'Framtidig arbeidsgiver',
-        r'Økonomisk støtte',
-        r'Eiendom i næring',
-        r'Aksjer m\.?v\.',
-        r'Utenlandsreiser',
-        r'Gaver',
-        r'Opplysninger om selskaps-?\n?gjeld',
-        r'Andre forhold',
-    ]
-    INTEREST_CAT_RES_NO_PAD = re.compile(r'|'.join(INTEREST_CAT_RES))
-    INTEREST_CAT_RES = re.compile(r'\s\s|'.join(INTEREST_CAT_RES))
+    NO_REP_TEXTS = ["Ingen registrerte opplysninger", "Ingen mottatte opplysninger"]
 
-    INTEREST_CATS = OrderedDict({
-        '1': 'Har ingen registreringspliktige interesser',
-        '2': 'Styreverv mv.',
-        '3': 'Selvstendig næring',
-        '4': 'Lønnet stilling mv.',
-        '5': 'Tidligere arbeidsgiver',
-        '6': 'Framtidig arbeidsgiver',
-        '7': 'Økonomisk støtte',
-        '8': 'Eiendom i næring',
-        '9': 'Aksjer mv.',
-        '10': 'Utenlandsreiser',
-        '11': 'Gaver',
-        '12': 'Opplysninger om selskapsgjeld',
-        '98': 'Andre forhold'
-    })
+    INTEREST_CATS = OrderedDict(
+        {
+            "1": "Har ingen registreringspliktige interesser",
+            "2": "Styreverv mv.",
+            "3": "Selvstendig næring",
+            "4": "Lønnet stilling mv.",
+            "5": "Tidligere arbeidsgiver",
+            "6": "Framtidig arbeidsgiver",
+            "7": "Økonomisk støtte",
+            "8": "Eiendom i næring",
+            "9": "Aksjer mv.",
+            "10": "Utenlandsreiser",
+            "11": "Gaver",
+            "12": "Opplysninger om selskapsgjeld",
+            "98": "Andre forhold",
+        }
+    )
+    pdf_dict = {}
 
-    def __init__(self, verbose=False):
+    def __init__(self, pdf_dict=None, verbose=False):
         self.verbose = verbose
+        self.pdf_dict = pdf_dict
 
     def download_new_pdf(self, url, path: Path):
         """ Download new file, if checksum changed then overwrite if not do nothing"""
@@ -69,7 +57,7 @@ class InterestParser:
             self.PDF_DIR.mkdir()
 
         r = requests.get(url, stream=True)
-        with tempfile.NamedTemporaryFile('wb', delete=False) as f:
+        with tempfile.NamedTemporaryFile("wb", delete=False) as f:
             for chunk in r.iter_content(chunk_size=4096):
                 if chunk:
                     f.write(chunk)
@@ -85,200 +73,200 @@ class InterestParser:
 
         return True
 
-    def clean_text(self, text):
-        """Clean static headings, page breaks and line numbers"""
-        text = text.replace('Regjeringsmedlemmer', '').replace('Vararepresentanter', '')
-        page_break_and_line_number_re = re.compile(r'\s+_______________\s+\d*\n?', re.MULTILINE)
-        return page_break_and_line_number_re.sub('', text)
+    def parse_document_meta(self):
+        first_page_texts = self.pdf_dict["pdf2xml"]["page"][0]["text"]
+        marker = "Ajourført"
+        updated_at = [text for text in first_page_texts if marker in text.get("#text", "")][0]["#text"]
+        return {"updated_at": self.last_updated_date(updated_at)}
 
-    padded_newlines_pattern = re.compile(r'\n\s{2,}', re.MULTILINE)
+    def first_page_with_rep_data(self):
+        for i, page in enumerate(self.pdf_dict["pdf2xml"]["page"]):
+            texts = page["text"]
+            for text in texts:
+                if "Representanter" in text.get("b", ""):
+                    return i
+        return -1
 
-    def clean_category_text(self, line):
-        """Cleanup table data as much as we can"""
-        # category lables
-        cleaned = self.INTEREST_CAT_RES.sub('', line.strip()).strip()
-        # newlines followed by more than 1 consecutive space
-        cleaned = self.padded_newlines_pattern.sub('\n', cleaned)
-        # hyphenated words
-        cleaned = cleaned.replace('-\n', '')
-        return cleaned
+    def parse_pdf_data(self):
+        """Parse meta data, reps and their interest table"""
+        rep_start = self.first_page_with_rep_data()
+        pages = self.pdf_dict["pdf2xml"]["page"]
+        assert rep_start != -1
+        rep_pages = pages[rep_start:]
 
-    def pdf_to_text(self, file_path):
-        p = subprocess.Popen(['pdftotext', '-nopgbrk', '-layout', file_path, '-'], stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE)
-        out, err = p.communicate()
+        non_rep_headers = [
+            "Representanter",
+            "Regjeringsmedlemmer",
+            "Vararepresentanter",
+        ]
+        left_col_y_coord = "106"
+        right_col_y_coord = "319"
 
-        return out.decode('utf-8')
-
-    def parse_representative_data(self, document_text, last_rep, rep=None):
-        """Parse meta data, positions and interest table"""
-        # FIXME: This is fragile stuff, will probably break often
-
-        # Representative meta data
-        last_name, first_name = last_rep.group('name').split(',')
-        rep_data = {key: last_rep.group(key).strip() for key in ['rep_number', 'party']}
-        rep_data.update({
-            'first_name': first_name.strip(),
-            'last_name': last_name.strip()
-        })
-
-        # Only look at the representatives section in the document text
-        rep_text_start = last_rep.span()[1]
-        rep_text_stop = rep.span()[0] if rep is not None else len(document_text)
-        rep_text = document_text[rep_text_start:rep_text_stop]
-
-        # Reps with no registered interests
-        if rep_text.strip() in self.NO_REP_TEXTS:
-            rep_data[self.NO_REP_TEXTS[0]] = True
-            return rep_data
-
-        # Split the representative section text by category id followed by a dot
-        new_category_pattern = re.compile(r'^(\d{1,2})\.\s', re.MULTILINE)
-
-        rep_data['by_category'] = self.parse_categories(new_category_pattern, rep_text)
-
-        return rep_data
-
-    def parse_categories(self, new_category_pattern, rep_text):
-        cats = {}
-        cat_id = None
-        for line in new_category_pattern.split(rep_text):
-            if line == '':
-                continue  # skip empty strings
-
-            elif is_int(line):
-                cat_id = line  # this is the category id
-            else:
-                cat_text = self.clean_category_text(line)
-                if cat_id == '1':  # No reg interests
-                    cat_text = True
-                elif self.INTEREST_CAT_RES_NO_PAD.findall(cat_text) or cat_text == '':
-                    continue
-                cats[self.INTEREST_CATS[cat_id]] = cat_text
-
-        return cats
-
-    def parse_pdf_text(self, text):
-        """ Match representative name, number, party and rest up until ')\n' and use these matches as delimiters"""
-        data = OrderedDict()
-        rep_pattern = re.compile(
-            r'(?P<name>[-\w,. ]+)\((?P<rep_number>\d+), (?P<party>\w+),([-,\w\s]+)?\)\n',
-            re.MULTILINE)
-
+        reps = []
         last_rep = None
-        matches = rep_pattern.finditer(text)
-        # Walk trough the matches
-        for i, rep in enumerate(matches):
-            if last_rep is None:
-                last_rep = rep
-                continue  # Skip first
+        by_category = {}
+        last_category = None
+        last_text = ""
+        for page in rep_pages:
+            for text in page["text"]:
+                # all reps are in bold (headers) with a few exceptions
+                header = text.get("b", "")
+                content = text.get("#text", "")
 
-            data[last_rep.group('rep_number')] = self.parse_representative_data(text, last_rep, rep=rep)
-            last_rep = rep
+                is_rep_header = header and header not in non_rep_headers
+                is_category = content and text["@left"] == left_col_y_coord and content != page["@number"]
+                is_interest_text = content and text["@left"] == right_col_y_coord
 
-        data[last_rep.group('rep_number')] = self.parse_representative_data(text, last_rep)
+                if is_rep_header:
+                    if last_category and last_text:
+                        # flush interest text
+                        by_category[last_category] = last_text
+                        last_text = ""
 
-        return data
+                    if by_category:
+                        # flush category data to previous rep
+                        rep_data = {**last_rep, "by_category": by_category}
+                        reps.append(rep_data)
+                        by_category = {}
 
-    def flatten_data(self, data):
-        flattened = []
-        for k, r in data.items():
-            cats = r.pop('by_category', {})
-            flat = r
-            for ck, cv in cats.items():
-                flat[ck] = cv
+                    rep_pattern = re.compile(
+                        r"(?P<full_name>[-\w,. ]+)\(((?P<rep_number>\d+), )?(?P<party>\w+),? ?([-,\w\s]+)?\)"
+                    )
+                    m = rep_pattern.match(header)
+                    assert m
+                    last_name, first_name = m.group("full_name").split(", ")
+                    last_rep = {
+                        "first_name": first_name.strip(),
+                        "last_name": last_name.strip(),
+                        "party": m.group("party").lower(),
+                    }
 
-            flattened.append(flat)
+                elif is_category:
+                    if last_category and last_text:
+                        # flush interest text
+                        by_category[last_category] = last_text
+                        last_text = ""
 
-        return flattened
+                    # FIXME: NO_REP_TEXTS
+                    last_category = "1"
+                    if "§" in content:
+                        last_category = content.replace("§", "").split(" ")[0].strip()
+
+                elif is_interest_text:
+                    last_text = f"{last_text}\n{content}" if last_text else f"{last_text}{content}"
+
+        # flush last data
+        if last_category and last_text:
+            by_category[last_category] = last_text
+        reps.append(
+            {**last_rep, "by_category": by_category,}
+        )
+
+        return reps
 
     def last_updated_date(self, text):
-        pattern = re.compile(r'Ajourført pr\. (.*)')
+        pattern = re.compile(r"Ajourført pr\. (.*)")
         months = {
-            'januar': '01',
-            'februar': '02',
-            'mars': '03',
-            'april': '04',
-            'mai': '05',
-            'juni': '06',
-            'juli': '07',
-            'august': '08',
-            'september': '09',
-            'oktober': '10',
-            'november': '11',
-            'desember': '12',
+            "januar": "01",
+            "februar": "02",
+            "mars": "03",
+            "april": "04",
+            "mai": "05",
+            "juni": "06",
+            "juli": "07",
+            "august": "08",
+            "september": "09",
+            "oktober": "10",
+            "november": "11",
+            "desember": "12",
         }
-        date_text = pattern.search(text).group(1).lower().replace('.', '').strip()
+        date_text = pattern.search(text).group(1).lower().replace(".", "").strip()
         for m, v in months.items():
             date_text = date_text.replace(m, v)
 
         # zero pad day
-        if date_text[1] == ' ':
-            date_text = '0' + date_text
+        if date_text[1] == " ":
+            date_text = "0" + date_text
 
-        return datetime.strptime(date_text, '%d %m %Y').date()
+        return datetime.strptime(date_text, "%d %m %Y").date()
 
     def fetch_latest_and_parse(self):
-        pdf_path = self.PDF_DIR.joinpath('interests-latest.pdf')
+        pdf_path = self.PDF_DIR.joinpath("interests-latest.pdf")
         is_updated = self.download_new_pdf(self.REP_URL, pdf_path)
         if not is_updated:
-            print("Did nothing, latest PDF already downloaded and parsed")
-            exit(0)
+            pass
+            # print("Did nothing, latest PDF already downloaded and parsed")
+            # exit(0)
 
         self.parse_and_save(pdf_path)
 
     def parse_and_save(self, pdf_path, archive_pdf=True, seen=None):
-        pdf_text = self.pdf_to_text(pdf_path)
-        pdf_text = self.clean_text(pdf_text)
-        last_updated = self.last_updated_date(pdf_text)
-        last_updated_str = last_updated.strftime('%Y-%m-%d')
+        self.pdf_dict = pdf_to_xml_dict(pdf_path)
+        meta = self.parse_document_meta()
+        updated_at_str = meta["updated_at"].strftime("%Y-%m-%d")
 
-        if seen and last_updated_str in seen:
+        if seen and updated_at_str in seen:
             print("Skipping already parsed '{}'".format(pdf_path))
             return
 
         if archive_pdf:
-            archive_path = self.PDF_DIR.joinpath('interests-{}.pdf'.format(last_updated_str))
+            archive_path = self.PDF_DIR.joinpath("interests-{}.pdf".format(updated_at_str))
             try:
                 shutil.copy(pdf_path, archive_path)
             except shutil.SameFileError:
                 pass  # skip already archived
 
-        res = self.parse_pdf_text(pdf_text)
-        res = self.flatten_data(res)
+        res = self.parse_pdf_data()
+        flattened = self.flatten_data(res)
 
-        field_names = ['rep_number', 'first_name', 'last_name', 'party'] + list(self.INTEREST_CATS.values()) + [self.NO_REP_TEXTS[0]]
-        csv_path = self.DATA_DIR.joinpath('interests-{}.csv'.format(last_updated_str))
-        write_csv(csv_path, res, field_names)
+        field_names = ["first_name", "last_name", "party"] + list(self.INTEREST_CATS.values()) + [self.NO_REP_TEXTS[0]]
+        csv_path = self.DATA_DIR.joinpath(f"interests-{updated_at_str}.csv")
+        json_path = self.DATA_DIR.joinpath(f"interests-{updated_at_str}.json")
+        write_csv(csv_path, flattened, field_names)
+        write_json(
+            json_path, {"_meta": {"categories": self.INTEREST_CATS, "updated_at": updated_at_str,}, "reps": res,},
+        )
 
-        json_path = self.DATA_DIR.joinpath('interests-{}.json'.format(last_updated_str))
-        write_json(json_path, res)
-
-        return last_updated_str
+        return updated_at_str
 
     def parse_existing(self):
         seen = []
-        for pdf in self.PDF_DIR.glob('*.pdf'):
+        for pdf in self.PDF_DIR.glob("*.pdf"):
             if self.verbose:
-                print(f'Parsing \'{pdf}\'')
+                print(f"Parsing '{pdf}'")
             last_updated_str = self.parse_and_save(pdf, archive_pdf=False, seen=seen)
 
             if last_updated_str is not None:
                 seen.append(last_updated_str)
 
+    def flatten_data(self, data):
+        flattened = []
+        for rep_data in data:
+            flat = {**rep_data}
+            cats = flat.pop("by_category", {})
+            for category_key, interest_text in cats.items():
+                if category_key not in self.INTEREST_CATS:
+                    pprint(cats)
+                    pprint(rep_data)
+                flat[self.INTEREST_CATS[category_key]] = interest_text
+
+            flattened.append(flat)
+
+        return flattened
+
 
 def get_arguments():
     desc = InterestParser.__doc__
     p = argparse.ArgumentParser(description=desc)
-    p.add_argument('--parse-existing', action='store_true', default=False,
-                   help='Reparse existing PDFs')
-    p.add_argument('--verbose', action='store_true', default=False,
-                   help='Verbose output')
+    p.add_argument(
+        "--parse-existing", action="store_true", default=False, help="Reparse existing PDFs",
+    )
+    p.add_argument("--verbose", action="store_true", default=False, help="Verbose output")
 
     return p.parse_args()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     args = get_arguments()
     parser = InterestParser(verbose=args.verbose)
     if args.parse_existing:
