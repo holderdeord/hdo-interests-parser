@@ -126,13 +126,30 @@ def test_second_rep_data_new(test_parser_new):
 def test_first_rep_data_new(test_parser_new):
     data = test_parser_new.parse_pdf_data()
     assert data
-    assert len(data) > 0
-    first_rep = data[0]
-    assert first_rep == {
+    reps_with_no_interests = [r for r in data if "1" in r['by_category'] and r['by_category']["1"]]
+    assert len(reps_with_no_interests) > 0
+    assert len(reps_with_no_interests) == 37
+    assert reps_with_no_interests[0] == {
         "by_category": {
             "1": True
         },
         "first_name": "Solveig Sundbø",
         "last_name": "Abrahamsen",
+        "party": "h",
+    }
+
+
+def test_rep_no_data(test_parser_new):
+    data = test_parser_new.parse_pdf_data()
+    assert data
+    reps_with_no_data = [r for r in data if "0" in r['by_category'] and r['by_category']["0"]]
+    assert len(reps_with_no_data) > 0
+    assert len(reps_with_no_data) == 32
+    assert reps_with_no_data[0] == {
+        "by_category": {
+            "0": True
+        },
+        "first_name": "Guro Angell",
+        "last_name": "Gimse",
         "party": "h",
     }

@@ -27,10 +27,9 @@ class InterestParser:
     PDF_DIR = Path("pdfs")
     DATA_DIR = Path("data")
 
-    NO_REP_TEXTS = ["Ingen registrerte opplysninger", "Ingen mottatte opplysninger"]
-
     INTEREST_CATS = OrderedDict(
         {
+            "0": "Ingen registrerte opplysninger",
             "1": "Har ingen registreringspliktige interesser",
             "2": "Styreverv mv.",
             "3": "Selvstendig næring",
@@ -46,6 +45,8 @@ class InterestParser:
             "98": "Andre forhold",
         }
     )
+    NO_REP_DATA_TEXTS = [INTEREST_CATS["0"], "Ingen mottatte opplysninger"]
+
     pdf_dict = {}
 
     def __init__(self, pdf_dict=None, verbose=False):
@@ -124,6 +125,7 @@ class InterestParser:
                 left_col_content = bool(content) and text["@left"] == left_col_y_coord
                 is_category = left_col_content and content != page["@number"]
                 is_no_interest_cat = left_col_content and content == self.INTEREST_CATS["1"]
+                is_no_rep_data = left_col_content and content in self.NO_REP_DATA_TEXTS
                 is_interest_text = content and text["@left"] in [right_col_y_coord, right_col_y_coord_legacy]
 
                 # Representative
@@ -164,7 +166,7 @@ class InterestParser:
                     }
 
                 # Interest category
-                elif is_category or is_no_interest_cat:
+                elif is_category or is_no_interest_cat or is_no_rep_data:
                     if last_category and last_text:
                         # flush interest text
                         by_category[last_category] = last_text
@@ -172,8 +174,9 @@ class InterestParser:
                     elif is_no_interest_cat:
                         # mark no interest category
                         by_category["1"] = True
+                    elif is_no_rep_data:
+                        by_category["0"] = True
 
-                    # FIXME: NO_REP_TEXTS
                     last_category = "1"
                     if content.startswith("§"):
                         last_category = content.replace("§", "").split(" ")[0].strip()
@@ -263,7 +266,7 @@ class InterestParser:
         write_json(json_path, json_data)
 
         flattened = self.flatten_data(res)
-        field_names = ["first_name", "last_name", "party"] + list(self.INTEREST_CATS.values()) + [self.NO_REP_TEXTS[0]]
+        field_names = ["first_name", "last_name", "party"] + list(self.INTEREST_CATS.values()) + [self.NO_REP_DATA_TEXTS[0]]
         csv_path = self.DATA_DIR.joinpath(f"interests-{updated_at_str}.csv")
         write_csv(csv_path, flattened, field_names)
 
