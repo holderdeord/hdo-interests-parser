@@ -78,8 +78,11 @@ class InterestParser:
     def parse_document_meta(self):
         first_page_texts = self.pdf_dict["pdf2xml"]["page"][0]["text"]
         marker = "Ajourført"
-        updated_at = [text for text in first_page_texts if marker in text.get("#text", "")][0]["#text"]
-        return {"updated_at": self.last_updated_date(updated_at)}
+        for text in first_page_texts:
+            content = text.get("#text", "")
+            if marker in content:
+                return {"updated_at": self.last_updated_date(content)}
+        return None
 
     def first_page_with_rep_data(self):
         for i, page in enumerate(self.pdf_dict["pdf2xml"]["page"]):
@@ -103,10 +106,10 @@ class InterestParser:
             "Regjeringsmedlemmer",
             "Vararepresentanter",
         ]
-        left_col_y_coord = "106"
-        # FIXME: calc these based on first rep data
-        right_col_y_coord = "319"
-        right_col_y_coord_legacy = "362"
+        left_col_y_coord = self.get_left_col_y_coord(non_rep_headers, rep_pages)
+        assert left_col_y_coord
+        right_col_y_coord = self.get_right_col_y_coord(left_col_y_coord, non_rep_headers, rep_pages)
+        assert right_col_y_coord
 
         reps = []
         last_rep = None
@@ -126,7 +129,7 @@ class InterestParser:
                 is_category = left_col_content and content != page["@number"]
                 is_no_interest_cat = left_col_content and content == self.INTEREST_CATS["1"]
                 is_no_rep_data = left_col_content and content in self.NO_REP_DATA_TEXTS
-                is_interest_text = content and text["@left"] in [right_col_y_coord, right_col_y_coord_legacy]
+                is_interest_text = content and text["@left"] == right_col_y_coord
 
                 # Representative
                 if is_rep_header:
@@ -206,6 +209,25 @@ class InterestParser:
         reps.append({**last_rep, "by_category": by_category})
 
         return reps
+
+    def get_left_col_y_coord(self, non_rep_headers, rep_pages):
+        for text in rep_pages[0]["text"]:
+            if text.get('b', text.get('#text', '')) in non_rep_headers:
+                return text.get('@left')
+
+        return None
+
+    def get_right_col_y_coord(self, left_col_y_coord, non_rep_headers, rep_pages):
+        for text in rep_pages[0]["text"]:
+            content = text.get('#text', '')
+            not_page_num_or_cat_id = len(content) > 3
+            non_interest_text_content = ['_______________'] + self.NO_REP_DATA_TEXTS + list(self.INTEREST_CATS.values()) + non_rep_headers
+            not_left_col = text.get('@left') != left_col_y_coord
+            likely_y_coord = int(text.get('@left')) > 200
+            if not_page_num_or_cat_id and content not in non_interest_text_content and not_left_col and likely_y_coord:
+                return text.get('@left')
+
+        return None
 
     def last_updated_date(self, text):
         pattern = re.compile(r"Ajourført pr\. (.*)")
