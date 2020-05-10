@@ -3,9 +3,16 @@ Parse (successfully) the [PDF containing the represantatives economic interests,
 Last updated by bot: 2020-02-28
 
 ## Setup
-    sudo apt install poppler-utils  # debian/ubuntu
-    brew install poppler  # macos
+```shell script
+sudo apt install poppler-utils  # debian/ubuntu
+brew install poppler  # macos
 
-    pipenv --three install
-    pipenv shell
-    python parser.py
+pipenv install --dev
+pipenv shell
+python parser.py
+```
+
+## Tests
+```shell script
+pytest -vv --diff-type=split
+```

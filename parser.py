@@ -85,7 +85,8 @@ class InterestParser:
             texts = page["text"]
             for text in texts:
                 heading = text.get("b", "")
-                if heading and "Representanter" in heading:
+                content = text.get("#text", "")
+                if "Representanter" in [heading, content]:
                     return i
         return -1
 
@@ -120,9 +121,12 @@ class InterestParser:
                 content = text.get("#text", "")
 
                 is_rep_header = header and header not in non_rep_headers
-                is_category = content and text["@left"] == left_col_y_coord and content != page["@number"]
+                left_col_content = bool(content) and text["@left"] == left_col_y_coord
+                is_category = left_col_content and content != page["@number"]
+                is_no_interest_cat = left_col_content and content == self.INTEREST_CATS["1"]
                 is_interest_text = content and text["@left"] in [right_col_y_coord, right_col_y_coord_legacy]
 
+                # Representative
                 if is_rep_header:
                     if last_category and last_text:
                         # flush interest text
@@ -159,11 +163,15 @@ class InterestParser:
                         "party": m.group("party").lower(),
                     }
 
-                elif is_category:
+                # Interest category
+                elif is_category or is_no_interest_cat:
                     if last_category and last_text:
                         # flush interest text
                         by_category[last_category] = last_text
                         last_text = ""
+                    elif is_no_interest_cat:
+                        # mark no interest category
+                        by_category["1"] = True
 
                     # FIXME: NO_REP_TEXTS
                     last_category = "1"
@@ -172,6 +180,7 @@ class InterestParser:
                     elif re.match(r"\d{1,2}\.", content):
                         last_category = content.replace(".", "").split(" ")[0].strip()
 
+                # Interest text
                 elif is_interest_text:
                     # FIXME: do this by setting state instead of reading ahead
                     if last_text_hyphenated:

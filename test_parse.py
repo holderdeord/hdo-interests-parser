@@ -97,12 +97,12 @@ def test_first_last_data(test_parser_new):
     }
 
 
-def test_first_rep_data_new(test_parser_new):
+def test_second_rep_data_new(test_parser_new):
     data = test_parser_new.parse_pdf_data()
     assert data
-    assert len(data) > 0
-    first_rep = data[0]
-    assert first_rep == {
+    assert len(data) > 1
+    second_rep = data[1]
+    assert second_rep == {
         "by_category": {
             "2": "Høy & Rodum Eiendom AS, styreleder\n"
             "KomRev Trøndelag IKS, styreleder (lønnet)\n"
@@ -119,5 +119,20 @@ def test_first_rep_data_new(test_parser_new):
         },
         "first_name": "Elin Rodum",
         "last_name": "Agdestein",
+        "party": "h",
+    }
+
+
+def test_first_rep_data_new(test_parser_new):
+    data = test_parser_new.parse_pdf_data()
+    assert data
+    assert len(data) > 0
+    first_rep = data[0]
+    assert first_rep == {
+        "by_category": {
+            "1": True
+        },
+        "first_name": "Solveig Sundbø",
+        "last_name": "Abrahamsen",
         "party": "h",
     }
