@@ -16,10 +16,11 @@ def pdf_dict():
 
 
 @fixture
-def test_parser(pdf_dict):
+def interest_parser(pdf_dict):
     return InterestParser(pdf_dict=pdf_dict)
 
 
+@pytest.mark.skip('Too slow')
 def test_pdf_to_xml_dict():
     pdf_path = Path("pdfs/interests-2020-03-23.pdf")
     pdf_dict = pdf_to_xml_dict(pdf_path)
@@ -30,8 +31,8 @@ def test_pdf_to_xml_dict():
     assert pdf_dict == expected
 
 
-def test_parse_date(test_parser):
-    meta = test_parser.parse_document_meta()
+def test_parse_date(interest_parser):
+    meta = interest_parser.parse_document_meta()
     assert meta
     assert meta.get("updated_at")
     updated_at = meta["updated_at"]
@@ -39,8 +40,8 @@ def test_parse_date(test_parser):
     assert updated_at.isoformat() == "2020-03-23"
 
 
-def test_rep_data(test_parser):
-    data = test_parser.parse_pdf_data()
+def test_rep_data(interest_parser):
+    data = interest_parser.parse_pdf_data()
     assert data
     assert len(data) > 0
 
@@ -49,9 +50,8 @@ def test_rep_data(test_parser):
         assert "first_name" in rep
 
 
-@pytest.mark.only()
-def test_first_last_data(test_parser):
-    data = test_parser.parse_pdf_data()
+def test_first_last_data(interest_parser):
+    data = interest_parser.parse_pdf_data()
     assert data
     assert len(data) > 0
     last_rep = data[-1]
@@ -63,13 +63,13 @@ def test_first_last_data(test_parser):
     }
 
 
-def test_first_rep_data(test_parser):
-    data = test_parser.parse_pdf_data()
+def test_first_rep_data(interest_parser):
+    data = interest_parser.parse_pdf_data()
     assert data
     assert len(data) > 0
     first_rep = data[0]
     assert first_rep == {
-        "by_category:": {
+        "by_category": {
             "2": "Høy & Rodum Eiendom AS, styreleder\n"
             "KomRev Trøndelag IKS, styreleder (lønnet)\n"
             "HRE Holding AS, styreleder\n"

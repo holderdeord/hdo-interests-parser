@@ -58,15 +58,19 @@ class InterestParser:
         for i, page in enumerate(self.pdf_dict["pdf2xml"]["page"]):
             texts = page["text"]
             for text in texts:
-                if "Representanter" in text.get("b", ""):
+                bold_text = (text.get("b", "") or "").strip()
+                text_plain = (text.get('#text', '') or "").strip()
+                if bold_text == "Representanter":
                     return i
-        return -1
+                elif text_plain == 'Representanter':
+                    return i
+        raise ValueError("Could not find page with representative heading")
 
     def parse_pdf_data(self):
         """Parse meta data, reps and their interest table"""
+
         rep_start = self.first_page_with_rep_data()
         pages = self.pdf_dict["pdf2xml"]["page"]
-        assert rep_start != -1
         rep_pages = pages[rep_start:]
 
         non_rep_headers = [
@@ -74,6 +78,7 @@ class InterestParser:
             "Regjeringsmedlemmer",
             "Vararepresentanter",
         ]
+        split_headers = ["Abrahamsen,", 'Amundsen,']
         left_col_y_coord = "106"
         right_col_y_coord = "319"
 
@@ -82,8 +87,11 @@ class InterestParser:
         by_category = {}
         last_category = None
         last_text = ""
+        swallowed_next = False
+
         for page in rep_pages:
-            for text in page["text"]:
+            texts = page["text"]
+            for text_idx, text in enumerate(texts):
                 # all reps are in bold (headers) with a few exceptions
                 header = text.get("b", "")
                 content = text.get("#text", "")
@@ -93,6 +101,16 @@ class InterestParser:
                 is_interest_text = content and text["@left"] == right_col_y_coord
 
                 if is_rep_header:
+                    # Should we swallow next?
+                    # Representative name header on same line or continues on next line
+                    should_swallow_next = header in split_headers or header[-1] == "-"
+                    if should_swallow_next:
+                        header = f'{header} {texts[text_idx + 1].get("b")}'
+                        swallowed_next = True
+                    elif swallowed_next:
+                        swallowed_next = False
+                        continue  # skip
+
                     if last_category and last_text:
                         # flush interest text
                         by_category[last_category] = last_text
@@ -108,7 +126,9 @@ class InterestParser:
                         r"(?P<full_name>[-\w,. ]+)\(((?P<rep_number>\d+), )?(?P<party>\w+),? ?([-,\w\s]+)?\)"
                     )
                     m = rep_pattern.match(header)
-                    assert m
+                    if not m:
+                        raise ValueError(f"No representative matched in representative header: {header}")
+
                     last_name, first_name = m.group("full_name").split(", ")
                     last_rep = {
                         "first_name": first_name.strip(),
@@ -139,7 +159,6 @@ class InterestParser:
                 "by_category": by_category,
             }
         )
-
         return reps
 
     def last_updated_date(self, text):

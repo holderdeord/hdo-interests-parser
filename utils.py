@@ -61,6 +61,7 @@ def write_csv(path: Path, data, field_names):
 
 
 def pdf_to_xml_dict(file_path):
+    """ Transform pdf into a python dictionary containing PDF data"""
     p = Popen(["pdftohtml", "-i", "-xml", "-stdout", file_path], stdout=PIPE, stderr=PIPE)
     out, err = p.communicate()
 
