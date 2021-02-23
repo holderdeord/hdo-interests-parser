@@ -24,6 +24,7 @@ class InterestParser:
     REP_URL = "https://www.stortinget.no/globalassets/pdf/verv_oekonomiske_interesser_register/verv_ok_interesser.pdf"
 
     NO_REP_TEXTS = ["Ingen registrerte opplysninger", "Ingen mottatte opplysninger"]
+    PAGE_SEPARATOR = "_______________"
 
     INTEREST_CATS = OrderedDict(
         {
@@ -59,12 +60,28 @@ class InterestParser:
             texts = page["text"]
             for text in texts:
                 bold_text = (text.get("b", "") or "").strip()
-                text_plain = (text.get('#text', '') or "").strip()
+                text_plain = (text.get("#text", "") or "").strip()
                 if bold_text == "Representanter":
                     return i
-                elif text_plain == 'Representanter':
+                elif text_plain == "Representanter":
                     return i
         raise ValueError("Could not find page with representative heading")
+
+    def find_y_coords(self, first_page):
+        category_coord = "106"  # Defaults needed?
+        interest_coord = "319"
+        for text in first_page["text"]:
+            if text.get("#text", "") in self.INTEREST_CATS.values():
+                category_coord = text.get("@left")
+                break
+
+        for text in first_page["text"]:
+            content = text.get("#text", "")
+            y_coord = text.get("@left")
+            if content and int(y_coord) > int(category_coord) and content != self.PAGE_SEPARATOR and len(content) > 1:
+                interest_coord = y_coord
+
+        return category_coord, interest_coord
 
     def parse_pdf_data(self):
         """Parse meta data, reps and their interest table"""
@@ -78,9 +95,8 @@ class InterestParser:
             "Regjeringsmedlemmer",
             "Vararepresentanter",
         ]
-        split_headers = ["Abrahamsen,", 'Amundsen,']
-        left_col_y_coord = "106"
-        right_col_y_coord = "319"
+        split_headers = ["Abrahamsen,", "Amundsen,"]
+        category_col_y_coord, interest_col_y_coord = self.find_y_coords(rep_pages[0])
 
         reps = []
         last_rep = None
@@ -88,6 +104,7 @@ class InterestParser:
         last_category = None
         last_text = ""
         swallowed_next = False
+        num_reps = 0
 
         for page in rep_pages:
             texts = page["text"]
@@ -96,9 +113,9 @@ class InterestParser:
                 header = text.get("b", "")
                 content = text.get("#text", "")
 
-                is_rep_header = header and header not in non_rep_headers
-                is_category = content and text["@left"] == left_col_y_coord and content != page["@number"]
-                is_interest_text = content and text["@left"] == right_col_y_coord
+                is_rep_header = bool(header and header not in non_rep_headers)
+                is_category = content and text["@left"] == category_col_y_coord and content != page["@number"]
+                is_interest_text = content and text["@left"] == interest_col_y_coord
 
                 if is_rep_header:
                     # Should we swallow next?
@@ -135,6 +152,7 @@ class InterestParser:
                         "last_name": last_name.strip(),
                         "party": m.group("party").lower(),
                     }
+                    num_reps += 1
 
                 elif is_category:
                     if last_category and last_text:
@@ -159,6 +177,10 @@ class InterestParser:
                 "by_category": by_category,
             }
         )
+
+        if num_reps != len(reps):
+            ValueError(f"Number of representatives {num_reps} does not match output {len(reps)}")
+
         return reps
 
     def last_updated_date(self, text):

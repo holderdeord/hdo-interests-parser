@@ -20,3 +20,4 @@ def test_dont_crash(interest_parser_2014_09_24):
     assert meta
     datas = interest_parser_2014_09_24.parse_pdf_data()
     assert datas
+    assert len(datas) == 217
