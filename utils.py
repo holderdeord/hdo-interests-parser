@@ -2,10 +2,27 @@
 import csv
 import hashlib
 import json
+import tempfile
 from pathlib import Path
 from subprocess import Popen, PIPE
 
+import requests
 import xmltodict
+
+MONTHS_NB = {
+    "januar": "01",
+    "februar": "02",
+    "mars": "03",
+    "april": "04",
+    "mai": "05",
+    "juni": "06",
+    "juli": "07",
+    "august": "08",
+    "september": "09",
+    "oktober": "10",
+    "november": "11",
+    "desember": "12",
+}
 
 
 def file_checksum(path: Path):
@@ -55,3 +72,24 @@ def pdf_to_text(file_path):
     out, err = p.communicate()
 
     return out.decode("utf-8")
+
+
+def download(url, path: Path):
+    """ Download new file, if checksum changed then overwrite if not do nothing"""
+
+    r = requests.get(url, stream=True)
+    with tempfile.NamedTemporaryFile("wb", delete=False) as f:
+        for chunk in r.iter_content(chunk_size=4096):
+            if chunk:
+                f.write(chunk)
+
+    tmp_file_path = Path(f.name)
+
+    if path.exists() and file_checksum(tmp_file_path) == file_checksum(path):
+        tmp_file_path.unlink()
+        return False
+
+    # Move/overwrite
+    tmp_file_path.rename(path)
+
+    return True

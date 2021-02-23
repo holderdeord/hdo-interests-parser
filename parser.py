@@ -2,29 +2,26 @@
 # -*- coding: utf-8 -*-
 import argparse
 import re
+from pathlib import Path
 from pprint import pprint
 
-import requests
-import tempfile
 import shutil
 
 from collections import OrderedDict
 from datetime import datetime
-from pathlib import Path
 
-from utils import write_csv, write_json, file_checksum, pdf_to_xml_dict
+from settings import PDF_DIR, DATA_DIR
+from utils import write_csv, write_json, pdf_to_xml_dict, MONTHS_NB
 
 
 class InterestParser:
     """
-        Fetch, parse and archive representative interests from stortinget.no.
+    Fetch, parse and archive representative interests from stortinget.no.
 
-        https://www.stortinget.no/no/Stortinget-og-demokratiet/Representantene/Okonomiske-interesser/
+    https://www.stortinget.no/no/Stortinget-og-demokratiet/Representantene/Okonomiske-interesser/
     """
 
     REP_URL = "https://www.stortinget.no/globalassets/pdf/verv_oekonomiske_interesser_register/verv_ok_interesser.pdf"
-    PDF_DIR = Path("pdfs")
-    DATA_DIR = Path("data")
 
     NO_REP_TEXTS = ["Ingen registrerte opplysninger", "Ingen mottatte opplysninger"]
 
@@ -50,28 +47,6 @@ class InterestParser:
     def __init__(self, pdf_dict=None, verbose=False):
         self.verbose = verbose
         self.pdf_dict = pdf_dict
-
-    def download_new_pdf(self, url, path: Path):
-        """ Download new file, if checksum changed then overwrite if not do nothing"""
-        if not self.PDF_DIR.exists():
-            self.PDF_DIR.mkdir()
-
-        r = requests.get(url, stream=True)
-        with tempfile.NamedTemporaryFile("wb", delete=False) as f:
-            for chunk in r.iter_content(chunk_size=4096):
-                if chunk:
-                    f.write(chunk)
-
-        tmp_file_path = Path(f.name)
-
-        if path.exists() and file_checksum(tmp_file_path) == file_checksum(path):
-            tmp_file_path.unlink()
-            return False
-
-        # Move/overwrite
-        tmp_file_path.rename(path)
-
-        return True
 
     def parse_document_meta(self):
         first_page_texts = self.pdf_dict["pdf2xml"]["page"][0]["text"]
@@ -159,29 +134,18 @@ class InterestParser:
         if last_category and last_text:
             by_category[last_category] = last_text
         reps.append(
-            {**last_rep, "by_category": by_category,}
+            {
+                **last_rep,
+                "by_category": by_category,
+            }
         )
 
         return reps
 
     def last_updated_date(self, text):
         pattern = re.compile(r"Ajourført pr\. (.*)")
-        months = {
-            "januar": "01",
-            "februar": "02",
-            "mars": "03",
-            "april": "04",
-            "mai": "05",
-            "juni": "06",
-            "juli": "07",
-            "august": "08",
-            "september": "09",
-            "oktober": "10",
-            "november": "11",
-            "desember": "12",
-        }
         date_text = pattern.search(text).group(1).lower().replace(".", "").strip()
-        for m, v in months.items():
+        for m, v in MONTHS_NB.items():
             date_text = date_text.replace(m, v)
 
         # zero pad day
@@ -189,16 +153,6 @@ class InterestParser:
             date_text = "0" + date_text
 
         return datetime.strptime(date_text, "%d %m %Y").date()
-
-    def fetch_latest_and_parse(self):
-        pdf_path = self.PDF_DIR.joinpath("interests-latest.pdf")
-        is_updated = self.download_new_pdf(self.REP_URL, pdf_path)
-        if not is_updated:
-            pass
-            # print("Did nothing, latest PDF already downloaded and parsed")
-            # exit(0)
-
-        self.parse_and_save(pdf_path)
 
     def parse_and_save(self, pdf_path, archive_pdf=True, seen=None):
         self.pdf_dict = pdf_to_xml_dict(pdf_path)
@@ -210,7 +164,7 @@ class InterestParser:
             return
 
         if archive_pdf:
-            archive_path = self.PDF_DIR.joinpath("interests-{}.pdf".format(updated_at_str))
+            archive_path = PDF_DIR.joinpath("interests-{}.pdf".format(updated_at_str))
             try:
                 shutil.copy(pdf_path, archive_path)
             except shutil.SameFileError:
@@ -220,18 +174,25 @@ class InterestParser:
         flattened = self.flatten_data(res)
 
         field_names = ["first_name", "last_name", "party"] + list(self.INTEREST_CATS.values()) + [self.NO_REP_TEXTS[0]]
-        csv_path = self.DATA_DIR.joinpath(f"interests-{updated_at_str}.csv")
-        json_path = self.DATA_DIR.joinpath(f"interests-{updated_at_str}.json")
+        csv_path = DATA_DIR.joinpath(f"interests-{updated_at_str}.csv")
+        json_path = DATA_DIR.joinpath(f"interests-{updated_at_str}.json")
         write_csv(csv_path, flattened, field_names)
         write_json(
-            json_path, {"_meta": {"categories": self.INTEREST_CATS, "updated_at": updated_at_str,}, "reps": res,},
+            json_path,
+            {
+                "_meta": {
+                    "categories": self.INTEREST_CATS,
+                    "updated_at": updated_at_str,
+                },
+                "reps": res,
+            },
         )
 
         return updated_at_str
 
-    def parse_existing(self):
+    def parse_all(self):
         seen = []
-        for pdf in self.PDF_DIR.glob("*.pdf"):
+        for pdf in PDF_DIR.glob("*.pdf"):
             if self.verbose:
                 print(f"Parsing '{pdf}'")
             last_updated_str = self.parse_and_save(pdf, archive_pdf=False, seen=seen)
@@ -255,21 +216,32 @@ class InterestParser:
         return flattened
 
 
-def get_arguments():
+def parse_cli_args():
     desc = InterestParser.__doc__
     p = argparse.ArgumentParser(description=desc)
     p.add_argument(
-        "--parse-existing", action="store_true", default=False, help="Reparse existing PDFs",
+        "--file",
+        help="Parse given PDF by filename",
+    )
+    p.add_argument(
+        "--all",
+        action="store_true",
+        default=False,
+        help="Parse PDFs in PDF_DIR",
     )
     p.add_argument("--verbose", action="store_true", default=False, help="Verbose output")
 
-    return p.parse_args()
+    _args = p.parse_args()
+
+    if (not _args.all and not _args.file) or (_args.all and _args.file):
+        p.error("Provide either --all or --file")
+    return _args
 
 
 if __name__ == "__main__":
-    args = get_arguments()
+    args = parse_cli_args()
     parser = InterestParser(verbose=args.verbose)
-    if args.parse_existing:
-        parser.parse_existing()
+    if args.all:
+        parser.parse_all()
     else:
-        parser.fetch_latest_and_parse()
+        parser.parse_and_save(Path(args.file))
