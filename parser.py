@@ -74,7 +74,7 @@ class InterestParser:
         raise ValueError("Could not find page with representative heading")
 
     def find_y_coords(self, first_page):
-        category_coord = "106"  # Defaults needed?
+        category_coord = "106"  # FIXME: can be more than one coord
         interest_coord = "319"
         for text in first_page["text"]:
             if text.get("#text", "") in self.INTEREST_CATS.values():
@@ -120,7 +120,7 @@ class InterestParser:
                 content = text.get("#text", "")
 
                 is_rep_header = bool(header and header not in non_rep_headers)
-                is_category = content and text["@left"] == category_col_y_coord and content != page["@number"]
+                is_category = self.is_category_text(category_col_y_coord, content, page, text)
                 is_interest_text = content and text["@left"] == interest_col_y_coord
 
                 if is_rep_header:
@@ -199,6 +199,20 @@ class InterestParser:
             ValueError(f"Number of representatives {num_reps} does not match output {len(reps)}")
 
         return reps
+
+    def is_category_text(self, category_col_y_coord, content, page, text):
+        if not content:
+            return False
+
+        if text["@left"] == category_col_y_coord and content != page["@number"]:
+            return True
+
+        if content.startswith("§"):
+            split_content = content.replace("§", "").split(" ")
+            if len(split_content) > 2 and content.replace("§", "").split(" ")[2] in self.CAT_INDEX:
+                return True
+
+        return False
 
     def last_updated_date(self, text):
         pattern = re.compile(r"Ajourført pr\. (.*)")

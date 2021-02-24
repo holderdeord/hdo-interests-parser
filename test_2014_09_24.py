@@ -1,7 +1,4 @@
 from pathlib import Path
-# from pprint import pprint
-
-import pytest
 from pytest import fixture
 
 from parser import InterestParser

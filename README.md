@@ -9,3 +9,11 @@ stortinget.no now publish historical versions from 2017 to date. There is some d
     pipenv install --dev
     pipenv run python parser.py --help
     pipenv run python scraper.py --help
+
+## Development
+Useful commands for testing the parser
+```
+python parser.py --file pdfs/interests-2014-09-24.pdf
+pdftohtml -i -xml -stdout pdfs/interests-2014-09-24.pdf > testy.xml  # ...and compare
+python parser.py --all --verbose  # Does anything unexpected change?
+```

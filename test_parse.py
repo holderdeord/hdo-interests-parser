@@ -20,7 +20,7 @@ def interest_parser(pdf_dict):
     return InterestParser(pdf_dict=pdf_dict)
 
 
-@pytest.mark.skip('Too slow')
+@pytest.mark.skip("Too slow")
 def test_pdf_to_xml_dict():
     pdf_path = Path("pdfs/interests-2020-03-23.pdf")
     pdf_dict = pdf_to_xml_dict(pdf_path)
@@ -62,11 +62,6 @@ def test_first_last_data(interest_parser):
         "by_category": {"2": "Styreleder Gamle Bæreiavegen boligsameie (lønnet)"},
     }
 
-
-def test_first_rep_data(interest_parser):
-    data = interest_parser.parse_pdf_data()
-    assert data
-    assert len(data) > 0
     first_rep = data[0]
     assert first_rep == {
         "by_category": {
@@ -87,3 +82,10 @@ def test_first_rep_data(interest_parser):
         "last_name": "Agdestein",
         "party": "h",
     }
+
+    # jan tore
+    jt = list(filter(lambda rep: rep["first_name"] == "Jan Tore" and rep["last_name"] == "Sanner", data))
+    assert jt
+    categories = jt[0]["by_category"]
+    expected_cats = ["4", "7", "10", "11"]
+    assert all([cat in categories for cat in expected_cats])
