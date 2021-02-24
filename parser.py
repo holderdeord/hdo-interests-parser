@@ -43,6 +43,12 @@ class InterestParser:
             "98": "Andre forhold",
         }
     )
+    CAT_INDEX = {
+        **{val: key for key, val in INTEREST_CATS.items()},
+        "Lønnet stilling m.v.": "4",  # FIXME: use regex
+        "Aksjer m.v.": "9",  # FIXME: use regex
+    }
+
     pdf_dict = {}
 
     def __init__(self, pdf_dict=None, verbose=False):
@@ -160,10 +166,21 @@ class InterestParser:
                         by_category[last_category] = last_text
                         last_text = ""
 
-                    # FIXME: NO_REP_TEXTS
                     last_category = "1"
+
+                    # Handle hyphenated categories
+                    if content[-1] == "-":
+                        if text_idx < len(texts) - 1:
+                            next_content = texts[text_idx + 1]
+                            content = f"{content[:-1]}{next_content}"
+                        # FIXME: Page wrap
+                        elif content == "Har ingen registreringsplik-":
+                            content = "Har ingen registreringspliktige interesser"
+
                     if "§" in content:
                         last_category = content.replace("§", "").split(" ")[0].strip()
+                    elif content in self.CAT_INDEX:
+                        last_category = self.CAT_INDEX[content]
 
                 elif is_interest_text:
                     last_text = f"{last_text}\n{content}" if last_text else f"{last_text}{content}"
